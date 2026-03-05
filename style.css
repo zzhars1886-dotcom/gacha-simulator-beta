@@ -2040,8 +2040,8 @@ button.danger {
   .cinematic-stage {
     --stage-w: min(86vw, 450px);
     --stage-h: min(60vh, 330px);
-    --card-w: min(35vw, 150px);
-    --type-w: min(66vw, 250px);
+    --card-w: min(22vw, 82px);
+    --type-w: min(32vw, 122px);
   }
 
   .cinematic-line {
@@ -2052,10 +2052,16 @@ button.danger {
   .cinematic-lines {
     left: 18px;
     top: 30px;
+    max-width: 62%;
   }
 
   .cinematic-card-wrap {
-    right: 16px;
+    right: 14px;
+    top: 14px;
+  }
+
+  .cinematic-type-display {
+    right: 12px;
     top: 16px;
   }
 
@@ -2075,6 +2081,36 @@ button.danger {
   .draw-anim-mode select {
     flex: 1;
     min-width: 0;
+  }
+
+  /* 移动端关闭大灯循环闪烁，避免抖动感 */
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .c-ring {
+    animation: none !important;
+  }
+
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .left-1,
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .right-1 {
+    animation: pageLaserDraw 0.8s cubic-bezier(0.16, 0.72, 0.2, 1) forwards 0.06s !important;
+  }
+
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .left-2,
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .right-2 {
+    animation: pageLaserDraw 0.88s cubic-bezier(0.16, 0.72, 0.2, 1) forwards 0.12s !important;
+  }
+
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .left-3,
+  #cinematicDemoModal:not(.hidden) .cinematic-page-lasers .right-3 {
+    animation: pageLaserDraw 0.94s cubic-bezier(0.16, 0.72, 0.2, 1) forwards 0.18s !important;
+  }
+
+  #cinematicDemoModal .cinematic-page-lasers .c-top {
+    stroke-width: 78;
+    opacity: 0.5;
+  }
+
+  #cinematicDemoModal .cinematic-page-lasers .c-top-inner {
+    stroke-width: 6;
+    opacity: 0.86;
   }
 }
 
