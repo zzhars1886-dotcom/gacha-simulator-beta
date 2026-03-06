@@ -1195,6 +1195,10 @@ let cinematicDemoContext = null;
 let cinematicDemoPreviewType = "史诗";
 let cinematicAssetLoadSeq = 0;
 const imageUrlResolveCache = {};
+const ASSET_MIRROR_BASES = [
+  "https://cdn.jsdelivr.net/gh/zzhars1886-dotcom/gacha-simulator-beta@main",
+  "https://cdn.jsdelivr.net/gh/zzhars1886-dotcom/gacha-simulator@main",
+];
 
 const ANIMATION_MODES = {
   FAVORED_ONLY: "favored_only",
@@ -2868,12 +2872,16 @@ function buildImageCandidateUrls(folders, cleanName) {
   const folderList = Array.isArray(folders) ? folders.slice() : [String(folders)];
   const normalized = folderList.filter(Boolean);
   if (!normalized.includes("assets")) normalized.push("assets");
-  const exts = ["png", "jpg", "jpeg", "webp"];
+  const exts = ["webp", "png", "jpg", "jpeg"];
   const encodedName = encodeURIComponent(cleanName);
   const urls = [];
   normalized.forEach((folder) => {
     exts.forEach((ext) => {
-      urls.push(`${folder}/${encodedName}.${ext}`);
+      const relativePath = `${folder}/${encodedName}.${ext}`;
+      urls.push(relativePath);
+      ASSET_MIRROR_BASES.forEach((base) => {
+        urls.push(`${base}/${relativePath}`);
+      });
     });
   });
   return urls;
@@ -2929,7 +2937,7 @@ function setPlayerImageFromAssets(imgEl, playerName) {
     imgEl.src = fallback;
     return;
   }
-  const exts = ["png", "jpg", "jpeg", "webp"];
+  const exts = ["webp", "png", "jpg", "jpeg"];
   const encodedName = encodeURIComponent(name);
   let idx = 0;
   const tryNext = () => {
@@ -2955,7 +2963,7 @@ function setNamedImageFromFolder(imgEl, folder, name, fallback = "") {
     if (fallback) imgEl.src = fallback;
     return;
   }
-  const exts = ["png", "jpg", "jpeg", "webp"];
+  const exts = ["webp", "png", "jpg", "jpeg"];
   const encodedName = encodeURIComponent(cleanName);
   let idx = 0;
   const tryNext = () => {
@@ -3002,7 +3010,7 @@ function setPlayerImageByPool(imgEl, poolKey, playerName) {
   }
   const folderList = Array.isArray(folders) ? folders.slice() : [String(folders)];
   if (!folderList.includes("assets")) folderList.push("assets");
-  const exts = ["png", "jpg", "jpeg", "webp"];
+  const exts = ["webp", "png", "jpg", "jpeg"];
   const encodedName = encodeURIComponent(cleanName);
   let folderIdx = 0;
   let extIdx = 0;
