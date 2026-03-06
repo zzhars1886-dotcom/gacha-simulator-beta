@@ -1193,6 +1193,8 @@ let cinematicDemoTimers = [];
 let cinematicDemoDone = false;
 let cinematicDemoContext = null;
 let cinematicDemoPreviewType = "史诗";
+let cinematicAssetLoadSeq = 0;
+const imageUrlResolveCache = {};
 
 const ANIMATION_MODES = {
   FAVORED_ONLY: "favored_only",
@@ -2837,6 +2839,88 @@ function getFallbackPlayerImageDataUrl() {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+function probeImageUrl(url, timeoutMs = 6500) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    let done = false;
+    const timer = window.setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error("timeout"));
+    }, timeoutMs);
+    img.onload = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      resolve(url);
+    };
+    img.onerror = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      reject(new Error("load_error"));
+    };
+    img.src = url;
+  });
+}
+
+function buildImageCandidateUrls(folders, cleanName) {
+  const folderList = Array.isArray(folders) ? folders.slice() : [String(folders)];
+  const normalized = folderList.filter(Boolean);
+  if (!normalized.includes("assets")) normalized.push("assets");
+  const exts = ["png", "jpg", "jpeg", "webp"];
+  const encodedName = encodeURIComponent(cleanName);
+  const urls = [];
+  normalized.forEach((folder) => {
+    exts.forEach((ext) => {
+      urls.push(`${folder}/${encodedName}.${ext}`);
+    });
+  });
+  return urls;
+}
+
+async function resolveFirstAvailableImageUrl(cacheKey, candidateUrls) {
+  if (imageUrlResolveCache[cacheKey]) {
+    return imageUrlResolveCache[cacheKey];
+  }
+  for (let i = 0; i < candidateUrls.length; i += 1) {
+    const url = candidateUrls[i];
+    try {
+      await probeImageUrl(url, 5200);
+      imageUrlResolveCache[cacheKey] = url;
+      return url;
+    } catch (e) {
+      try {
+        const retryUrl = `${url}${url.includes("?") ? "&" : "?"}r=${Date.now()}`;
+        await probeImageUrl(retryUrl, 5200);
+        imageUrlResolveCache[cacheKey] = retryUrl;
+        return retryUrl;
+      } catch (e2) {
+        // try next candidate
+      }
+    }
+  }
+  return "";
+}
+
+async function resolveCinematicImageUrls(poolKey, typeName, playerName, isLiveEvent) {
+  const cleanType = String(typeName || "").trim();
+  const cleanPlayer = String(playerName || "").trim();
+  const typeCandidates = cleanType ? buildImageCandidateUrls(["assets/types"], cleanType) : [];
+  const playerFolders = isLiveEvent ? getCinematicPlayerImageFolder(poolKey) : ["assets"];
+  const playerCandidates = cleanPlayer ? buildImageCandidateUrls(playerFolders, cleanPlayer) : [];
+
+  const [typeUrl, playerUrl] = await Promise.all([
+    typeCandidates.length
+      ? resolveFirstAvailableImageUrl(`type|${cleanType}`, typeCandidates)
+      : Promise.resolve(""),
+    playerCandidates.length
+      ? resolveFirstAvailableImageUrl(`player|${poolKey}|${cleanPlayer}`, playerCandidates)
+      : Promise.resolve(""),
+  ]);
+  return { typeUrl, playerUrl };
+}
+
 function setPlayerImageFromAssets(imgEl, playerName) {
   if (!imgEl) return;
   const fallback = getFallbackPlayerImageDataUrl();
@@ -3114,10 +3198,11 @@ function replayCinematicDemoModal(options = {}) {
   if (ownedInfo) {
     ownedInfo.classList.remove("show");
   }
-
+  const currentLoadSeq = ++cinematicAssetLoadSeq;
   stage.classList.remove("play");
-  void stage.offsetWidth;
-  stage.classList.add("play");
+  if (typeDisplayImg) typeDisplayImg.src = "";
+  if (playerImg) playerImg.src = "";
+  if (peekImg) peekImg.src = "";
   const isLiveEvent = Boolean(options && options.mode === "live" && options.event);
   const event = isLiveEvent ? options.event : null;
   const targetPlayerName = isLiveEvent
@@ -3158,19 +3243,10 @@ function replayCinematicDemoModal(options = {}) {
     rawEvent: isLiveEvent ? { ...event } : null,
     previewType: isLiveEvent ? null : targetTypeName,
   };
-  setNamedImageFromFolder(typeDisplayImg, "assets/types", targetTypeName, "");
-  if (isLiveEvent) {
-    setPlayerImageByPool(playerImg, activePoolKey, targetPlayerName);
-    setPlayerImageByPool(peekImg, activePoolKey, targetPlayerName);
-  } else {
-    setPlayerImageFromAssets(playerImg, targetPlayerName);
-    setPlayerImageFromAssets(peekImg, targetPlayerName);
-  }
   if (ownedInfo) {
     const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
     ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
   }
-
   const schedule = (delay, fn) => {
     cinematicDemoTimers.push(window.setTimeout(fn, delay));
   };
@@ -3196,45 +3272,89 @@ function replayCinematicDemoModal(options = {}) {
     return delayHighlight + highlightText.length * charDelay;
   };
 
-  showLine(line1, "<span class=\"expected-value\">出货啦！</span>", 280);
-  // 关键词出现与右侧图片节点严格对齐：
-  // 类型 2.3s（类型图），位置 5.1s（开角图），名字 7.9s（完整图）
-  showLineWithPausedHighlight(
-    line2,
-    "类型是~ ",
-    `${targetTypeName}！`,
-    1200,
-    2300,
-    200
-  );
-  showLineWithPausedHighlight(
-    line3,
-    "注册位置是~ ",
-    `${targetPosition}！`,
-    4000,
-    5100,
-    200
-  );
-  const line4DoneAt = showLineWithPausedHighlight(
-    line4,
-    "他就是！ ",
-    `${targetPlayerName}！！！`,
-    6800,
-    7900,
-    230
-  );
-  if (isFavored) {
-    showLine(line5, "恭喜你获得心仪球员！", line4DoneAt + 220);
-  }
-  showLine(line6, buildCinematicStatsLine(cinematicDemoContext), line4DoneAt + 520);
-  if (ownedInfo) {
-    schedule(line4DoneAt + 120, () => {
-      ownedInfo.classList.add("show");
+  const startTimeline = () => {
+    if (currentLoadSeq !== cinematicAssetLoadSeq) return;
+    stage.classList.remove("play");
+    void stage.offsetWidth;
+    stage.classList.add("play");
+    showLine(line1, "<span class=\"expected-value\">出货啦！</span>", 280);
+    // 关键词出现与右侧图片节点严格对齐：
+    // 类型 2.3s（类型图），位置 5.1s（开角图），名字 7.9s（完整图）
+    showLineWithPausedHighlight(
+      line2,
+      "类型是~ ",
+      `${targetTypeName}！`,
+      1200,
+      2300,
+      200
+    );
+    showLineWithPausedHighlight(
+      line3,
+      "注册位置是~ ",
+      `${targetPosition}！`,
+      4000,
+      5100,
+      200
+    );
+    const line4DoneAt = showLineWithPausedHighlight(
+      line4,
+      "他就是！ ",
+      `${targetPlayerName}！！！`,
+      6800,
+      7900,
+      230
+    );
+    if (isFavored) {
+      showLine(line5, "恭喜你获得心仪球员！", line4DoneAt + 220);
+    }
+    showLine(line6, buildCinematicStatsLine(cinematicDemoContext), line4DoneAt + 520);
+    if (ownedInfo) {
+      schedule(line4DoneAt + 120, () => {
+        ownedInfo.classList.add("show");
+      });
+    }
+    schedule(line4DoneAt + 760, () => {
+      cinematicDemoDone = true;
     });
-  }
-  schedule(line4DoneAt + 760, () => {
-    cinematicDemoDone = true;
-  });
+  };
+
+  resolveCinematicImageUrls(activePoolKey, targetTypeName, targetPlayerName, isLiveEvent)
+    .then(({ typeUrl, playerUrl }) => {
+      if (currentLoadSeq !== cinematicAssetLoadSeq) return;
+      const fallback = getFallbackPlayerImageDataUrl();
+      if (typeDisplayImg) {
+        typeDisplayImg.src = typeUrl || "";
+      }
+      if (playerImg) {
+        playerImg.src = playerUrl || fallback;
+      }
+      if (peekImg) {
+        peekImg.src = playerUrl || fallback;
+      }
+      if (ownedInfo) {
+        const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
+        ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
+      }
+      startTimeline();
+    })
+    .catch(() => {
+      if (currentLoadSeq !== cinematicAssetLoadSeq) return;
+      const fallback = getFallbackPlayerImageDataUrl();
+      if (typeDisplayImg) {
+        typeDisplayImg.src = "";
+      }
+      if (playerImg) {
+        playerImg.src = fallback;
+      }
+      if (peekImg) {
+        peekImg.src = fallback;
+      }
+      if (ownedInfo) {
+        const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
+        ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
+      }
+      startTimeline();
+    });
 }
 
 function closeCinematicDemoModal() {
@@ -3242,6 +3362,7 @@ function closeCinematicDemoModal() {
   const stage = modal ? modal.querySelector(".cinematic-stage") : null;
   const btnCinematicClose = document.getElementById("btnCinematicClose");
   const shouldResumeAutoRewards = Boolean(cinematicDemoContext && cinematicDemoContext.isLiveEvent);
+  cinematicAssetLoadSeq += 1;
   cinematicDemoTimers.forEach((id) => window.clearTimeout(id));
   cinematicDemoTimers = [];
   cinematicDemoDone = false;
