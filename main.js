@@ -1193,12 +1193,6 @@ let cinematicDemoTimers = [];
 let cinematicDemoDone = false;
 let cinematicDemoContext = null;
 let cinematicDemoPreviewType = "史诗";
-let cinematicAssetLoadSeq = 0;
-const imageUrlResolveCache = {};
-const ASSET_MIRROR_BASES = [
-  "https://cdn.jsdelivr.net/gh/zzhars1886-dotcom/gacha-simulator-beta@main",
-  "https://cdn.jsdelivr.net/gh/zzhars1886-dotcom/gacha-simulator@main",
-];
 
 const ANIMATION_MODES = {
   FAVORED_ONLY: "favored_only",
@@ -2843,92 +2837,6 @@ function getFallbackPlayerImageDataUrl() {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function probeImageUrl(url, timeoutMs = 6500) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    let done = false;
-    const timer = window.setTimeout(() => {
-      if (done) return;
-      done = true;
-      reject(new Error("timeout"));
-    }, timeoutMs);
-    img.onload = () => {
-      if (done) return;
-      done = true;
-      window.clearTimeout(timer);
-      resolve(url);
-    };
-    img.onerror = () => {
-      if (done) return;
-      done = true;
-      window.clearTimeout(timer);
-      reject(new Error("load_error"));
-    };
-    img.src = url;
-  });
-}
-
-function buildImageCandidateUrls(folders, cleanName) {
-  const folderList = Array.isArray(folders) ? folders.slice() : [String(folders)];
-  const normalized = folderList.filter(Boolean);
-  if (!normalized.includes("assets")) normalized.push("assets");
-  const exts = ["webp", "png", "jpg", "jpeg"];
-  const encodedName = encodeURIComponent(cleanName);
-  const urls = [];
-  normalized.forEach((folder) => {
-    exts.forEach((ext) => {
-      const relativePath = `${folder}/${encodedName}.${ext}`;
-      urls.push(relativePath);
-      ASSET_MIRROR_BASES.forEach((base) => {
-        urls.push(`${base}/${relativePath}`);
-      });
-    });
-  });
-  return urls;
-}
-
-async function resolveFirstAvailableImageUrl(cacheKey, candidateUrls) {
-  if (imageUrlResolveCache[cacheKey]) {
-    return imageUrlResolveCache[cacheKey];
-  }
-  for (let i = 0; i < candidateUrls.length; i += 1) {
-    const url = candidateUrls[i];
-    try {
-      await probeImageUrl(url, 5200);
-      imageUrlResolveCache[cacheKey] = url;
-      return url;
-    } catch (e) {
-      try {
-        const retryUrl = `${url}${url.includes("?") ? "&" : "?"}r=${Date.now()}`;
-        await probeImageUrl(retryUrl, 5200);
-        imageUrlResolveCache[cacheKey] = retryUrl;
-        return retryUrl;
-      } catch (e2) {
-        // try next candidate
-      }
-    }
-  }
-  return "";
-}
-
-async function resolveCinematicImageUrls(poolKey, typeName, playerName, isLiveEvent) {
-  const cleanType = String(typeName || "").trim();
-  const cleanPlayer = String(playerName || "").trim();
-  const typeCandidates = cleanType ? buildImageCandidateUrls(["assets/types"], cleanType) : [];
-  const playerFolders = isLiveEvent ? getCinematicPlayerImageFolder(poolKey) : ["assets"];
-  const playerCandidates = cleanPlayer ? buildImageCandidateUrls(playerFolders, cleanPlayer) : [];
-
-  const [typeUrl, playerUrl] = await Promise.all([
-    typeCandidates.length
-      ? resolveFirstAvailableImageUrl(`type|${cleanType}`, typeCandidates)
-      : Promise.resolve(""),
-    playerCandidates.length
-      ? resolveFirstAvailableImageUrl(`player|${poolKey}|${cleanPlayer}`, playerCandidates)
-      : Promise.resolve(""),
-  ]);
-  return { typeUrl, playerUrl };
-}
-
 function setPlayerImageFromAssets(imgEl, playerName) {
   if (!imgEl) return;
   const fallback = getFallbackPlayerImageDataUrl();
@@ -3206,11 +3114,7 @@ function replayCinematicDemoModal(options = {}) {
   if (ownedInfo) {
     ownedInfo.classList.remove("show");
   }
-  const currentLoadSeq = ++cinematicAssetLoadSeq;
   stage.classList.remove("play");
-  if (typeDisplayImg) typeDisplayImg.src = "";
-  if (playerImg) playerImg.src = "";
-  if (peekImg) peekImg.src = "";
   const isLiveEvent = Boolean(options && options.mode === "live" && options.event);
   const event = isLiveEvent ? options.event : null;
   const targetPlayerName = isLiveEvent
@@ -3254,6 +3158,14 @@ function replayCinematicDemoModal(options = {}) {
   if (ownedInfo) {
     const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
     ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
+  }
+  setNamedImageFromFolder(typeDisplayImg, "assets/types", targetTypeName, "");
+  if (isLiveEvent) {
+    setPlayerImageByPool(playerImg, activePoolKey, targetPlayerName);
+    setPlayerImageByPool(peekImg, activePoolKey, targetPlayerName);
+  } else {
+    setPlayerImageFromAssets(playerImg, targetPlayerName);
+    setPlayerImageFromAssets(peekImg, targetPlayerName);
   }
   const schedule = (delay, fn) => {
     cinematicDemoTimers.push(window.setTimeout(fn, delay));
@@ -3322,42 +3234,6 @@ function replayCinematicDemoModal(options = {}) {
   schedule(line4DoneAt + 760, () => {
     cinematicDemoDone = true;
   });
-
-  resolveCinematicImageUrls(activePoolKey, targetTypeName, targetPlayerName, isLiveEvent)
-    .then(({ typeUrl, playerUrl }) => {
-      if (currentLoadSeq !== cinematicAssetLoadSeq) return;
-      const fallback = getFallbackPlayerImageDataUrl();
-      if (typeDisplayImg) {
-        typeDisplayImg.src = typeUrl || "";
-      }
-      if (playerImg) {
-        playerImg.src = playerUrl || fallback;
-      }
-      if (peekImg) {
-        peekImg.src = playerUrl || fallback;
-      }
-      if (ownedInfo) {
-        const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
-        ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
-      }
-    })
-    .catch(() => {
-      if (currentLoadSeq !== cinematicAssetLoadSeq) return;
-      const fallback = getFallbackPlayerImageDataUrl();
-      if (typeDisplayImg) {
-        typeDisplayImg.src = "";
-      }
-      if (playerImg) {
-        playerImg.src = fallback;
-      }
-      if (peekImg) {
-        peekImg.src = fallback;
-      }
-      if (ownedInfo) {
-        const ownedCount = Math.max(0, Number(state.empoweredCounts[targetPlayerName]) || 0);
-        ownedInfo.textContent = ownedCount <= 1 ? "首次获得" : `第 ${ownedCount} 张`;
-      }
-    });
 }
 
 function closeCinematicDemoModal() {
@@ -3365,7 +3241,6 @@ function closeCinematicDemoModal() {
   const stage = modal ? modal.querySelector(".cinematic-stage") : null;
   const btnCinematicClose = document.getElementById("btnCinematicClose");
   const shouldResumeAutoRewards = Boolean(cinematicDemoContext && cinematicDemoContext.isLiveEvent);
-  cinematicAssetLoadSeq += 1;
   cinematicDemoTimers.forEach((id) => window.clearTimeout(id));
   cinematicDemoTimers = [];
   cinematicDemoDone = false;
